@@ -8,7 +8,12 @@ import platform
 from tkinter import messagebox
 from photosorter.core import PhotoSorter
 from photosorter.rules import SortingRules
-
+import json
+import urllib.request
+import webbrowser
+import platform
+import ssl
+import certifi
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, BASE_DIR)
@@ -198,6 +203,8 @@ class PhotoSorterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        self.CURRENT_VERSION = "v1.0.0"
+
         self.title("Сортировщик фото")
         self.geometry("650x420")
         self.minsize(600, 420)
@@ -219,7 +226,40 @@ class PhotoSorterApp(ctk.CTk):
                 img_tk = ImageTk.PhotoImage(Image.open(icon_png_path))
                 self.wm_iconphoto(False, img_tk)
 
+        threading.Thread(target=self.check_for_updates, daemon=True).start()
         self._create_widgets()
+
+    def check_for_updates(self) -> None:
+        url = "https://api.github.com/repos/almiraira/photosorter/releases/latest"
+
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'PhotoSorter-App'})
+            context = ssl.create_default_context(cafile=certifi.where())
+
+            with urllib.request.urlopen(req, timeout=5, context=context) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode())
+                    latest_version = data.get("tag_name", "")
+                    html_url = data.get("html_url", "")
+
+                    if latest_version and latest_version != self.CURRENT_VERSION:
+                        self.after(0, lambda: self.ask_to_update(latest_version, html_url))
+                    print(f"Проверка обновлений завершена. Текущая версия: {self.CURRENT_VERSION}, последняя версия: {latest_version}")
+        except Exception as e:
+            print(f"Фоновая проверка обновлений пропущена: {e}")
+
+    def ask_to_update(self, new_version: str, url: str) -> None:
+        from tkinter import messagebox
+
+        answer = messagebox.askyesno(
+            "Доступно обновление!",
+            f"Обнаружена новая версия: {new_version}\n"
+            f"Ваша текущая версия: {self.CURRENT_VERSION}\n\n"
+            "Хотите перейти на GitHub, чтобы скачать новую версию?"
+        )
+        if answer:
+            webbrowser.open(url)
+
 
     def _create_widgets(self):
         folder_frame = ctk.CTkFrame(self)
