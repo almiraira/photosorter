@@ -283,6 +283,9 @@ class PhotoSorterApp(ctk.CTk):
 
         threading.Thread(target=self.check_for_updates, daemon=True).start()
         self._create_widgets()
+        self.lift()
+        self.focus_force()
+
 
     def check_for_updates(self) -> None:
         url = "https://api.github.com/repos/almiraira/photosorter/releases/latest"
