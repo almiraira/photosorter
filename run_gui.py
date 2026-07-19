@@ -11,14 +11,12 @@ from photosorter.rules import SortingRules
 import json
 import urllib.request
 import webbrowser
-import platform
 import ssl
 import certifi
+import gc
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, BASE_DIR)
-
-
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -63,6 +61,7 @@ class PreviewWindow(ctk.CTkToplevel):
         self.scroll_preview = ctk.CTkScrollableFrame(self, label_text="Предварительный просмотр дерева папок")
         self.scroll_preview.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
+        self.scroll_preview.bind("<Motion>", self._ensure_preview_closed)
         self._bind_mouse_wheel(self.scroll_preview)
 
     def _prepare_queue(self):
@@ -140,9 +139,7 @@ class PreviewWindow(ctk.CTkToplevel):
 
     def exclude_file(self, folder, full_path, filename, frame_widget):
         self.hide_image_tooltip(None)
-
         self.on_exclude_callback(folder, full_path, filename)
-
         frame_widget.destroy()
 
         if folder not in self.parent.current_plan:
@@ -150,10 +147,12 @@ class PreviewWindow(ctk.CTkToplevel):
                 self.folder_widgets[folder].destroy()
                 del self.folder_widgets[folder]
 
-
     def show_image_tooltip(self, event, file_path):
         if self.tooltip:
-            self.tooltip.destroy()
+            try:
+                self.tooltip.destroy()
+            except Exception:
+                pass
 
         ext = os.path.splitext(file_path)[1].lower()
         if ext not in ('.jpg', '.jpeg', '.png', '.bmp', '.webp'):
@@ -161,8 +160,9 @@ class PreviewWindow(ctk.CTkToplevel):
 
         try:
             raw_img = Image.open(file_path)
+            raw_img.thumbnail((200, 200), Image.Resampling.BILINEAR)
 
-            self.tooltip_image = ctk.CTkImage(light_image=raw_img, size=(200, 200))
+            self.tooltip_image = ctk.CTkImage(light_image=raw_img, size=raw_img.size)
 
             self.tooltip = ctk.CTkToplevel(self)
             self.tooltip.overrideredirect(True)
@@ -175,28 +175,53 @@ class PreviewWindow(ctk.CTkToplevel):
         except Exception as e:
             print(f"Ошибка чтения миниатюры {file_path}: {e}")
             if self.tooltip:
-                self.tooltip.destroy()
+                try:
+                    self.tooltip.destroy()
+                except Exception:
+                    pass
                 self.tooltip = None
 
     def move_image_tooltip(self, event):
         if self.tooltip:
             x = event.x_root + 20
             y = event.y_root + 20
-            self.tooltip.geometry(f"+{x}+{y}")
+            try:
+                self.tooltip.geometry(f"+{x}+{y}")
+            except Exception:
+                pass
 
     def hide_image_tooltip(self, event):
         if self.tooltip:
-            self.tooltip.destroy()
+            try:
+                self.tooltip.destroy()
+            except Exception:
+                pass
             self.tooltip = None
             self.tooltip_image = None
+            gc.collect()
+
+    def _ensure_preview_closed(self, event) -> None:
+        if self.tooltip:
+            self.hide_image_tooltip(None)
 
     def _bind_mouse_wheel(self, widget):
         widget.bind("<MouseWheel>", self._on_mouse_wheel)
         for child in widget.winfo_children():
+            child.bind("<Motion>", self._ensure_preview_closed)
             self._bind_mouse_wheel(child)
 
-    def _on_mouse_wheel(self, event):
-        self.scroll_preview._canvas.yview_scroll(int(-1 * event.delta), "units")
+    def _on_mouse_wheel(self, event) -> None:
+        if event.delta:
+            direction = -1 if event.delta > 0 else 1
+        else:
+            direction = 1 if event.num == 5 else -1
+        try:
+            if hasattr(self.scroll_preview, "_canvas"):
+                self.scroll_preview._canvas.yview_scroll(direction, "units")
+            elif hasattr(self.scroll_preview, "_parent_canvas"):
+                self.scroll_preview._parent_canvas.yview_scroll(direction, "units")
+        except Exception as e:
+            pass
 
 
 class PhotoSorterApp(ctk.CTk):
@@ -222,7 +247,6 @@ class PhotoSorterApp(ctk.CTk):
                 self.iconbitmap(icon_ico_path)
         else:
             if os.path.exists(icon_png_path):
-                img = ctk.CTkImage(light_image=Image.open(icon_png_path))
                 img_tk = ImageTk.PhotoImage(Image.open(icon_png_path))
                 self.wm_iconphoto(False, img_tk)
 
@@ -249,8 +273,6 @@ class PhotoSorterApp(ctk.CTk):
             print(f"Фоновая проверка обновлений пропущена: {e}")
 
     def ask_to_update(self, new_version: str, url: str) -> None:
-        from tkinter import messagebox
-
         answer = messagebox.askyesno(
             "Доступно обновление!",
             f"Обнаружена новая версия: {new_version}\n"
@@ -259,7 +281,6 @@ class PhotoSorterApp(ctk.CTk):
         )
         if answer:
             webbrowser.open(url)
-
 
     def _create_widgets(self):
         folder_frame = ctk.CTkFrame(self)
