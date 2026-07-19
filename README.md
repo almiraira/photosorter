@@ -56,8 +56,8 @@
 4. Запустить: `python run_gui.py`
 
 ### Сборка через PyInstaller
-* **Windows:** `pyinstaller --noconsole --onefile --icon=icon.ico run_gui.py`
-* **macOS:** `pyinstaller --noconsole --onefile --name="PhotoSorter" --icon=icon.icns --add-data ".venv/lib/python3.12/site-packages/customtkinter:customtkinter" run_gui.py`
+* **Windows:** `pyinstaller --noconsole --onefile --name "PhotoSorter" --icon=icon.ico --add-data "icon.ico;." run_gui.py`
+* **macOS:** `pyinstaller --noconsole --onedir --name="PhotoSorter" --icon=icon.icns --add-data ".venv/lib/python3.14/site-packages/customtkinter:customtkinter" run_gui.py`
 
 </details>
 
