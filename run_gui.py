@@ -34,19 +34,36 @@ class PreviewWindow(ctk.CTkToplevel):
         self.geometry("800x700")
         self.minsize(600, 500)
 
+        self.is_windows = (platform.system() == "Windows")
+
+        if self.is_windows:
+            self.tooltip = ctk.CTkToplevel(self)
+            self.tooltip.overrideredirect(True)
+            self.tooltip.withdraw()
+            self.tooltip_label = ctk.CTkLabel(self.tooltip, text="")
+            self.tooltip_label.pack(padx=3, pady=3)
+        else:
+            self.tooltip = None
+            self.tooltip_image = None
+
         self.preview_queue = []
         self.items_per_page = 100
-
         self.folder_widgets = {}
-
-        self.tooltip = None
-        self.tooltip_image = None
 
         self._create_widgets()
         self._prepare_queue()
 
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.lift()
         self.focus_set()
+
+    def on_close(self):
+        if self.is_windows and self.tooltip:
+            try:
+                self.tooltip.destroy()
+            except Exception:
+                pass
+        self.destroy()
 
     def _create_widgets(self):
         info_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -61,7 +78,9 @@ class PreviewWindow(ctk.CTkToplevel):
         self.scroll_preview = ctk.CTkScrollableFrame(self, label_text="Предварительный просмотр дерева папок")
         self.scroll_preview.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        self.scroll_preview.bind("<Motion>", self._ensure_preview_closed)
+        if self.is_windows:
+            self.scroll_preview.bind("<Motion>", self._ensure_preview_closed)
+
         self._bind_mouse_wheel(self.scroll_preview)
 
     def _prepare_queue(self):
@@ -90,12 +109,8 @@ class PreviewWindow(ctk.CTkToplevel):
 
         for item_type, data in chunk:
             if item_type == "folder":
-                folder_lbl = ctk.CTkLabel(
-                    self.scroll_preview,
-                    text=f"📁 {data}/",
-                    font=("Arial", 13, "bold"),
-                    text_color="#3498db"
-                )
+                folder_lbl = ctk.CTkLabel(self.scroll_preview, text=f"📁 {data}/", font=("Arial", 13, "bold"),
+                                          text_color="#3498db")
                 folder_lbl.pack(anchor="w", padx=5, pady=(10, 2))
                 self.folder_widgets[data] = folder_lbl
 
@@ -113,25 +128,15 @@ class PreviewWindow(ctk.CTkToplevel):
                 file_lbl.bind("<Motion>", self.move_image_tooltip)
 
                 remove_btn = ctk.CTkButton(
-                    item_frame,
-                    text="✕",
-                    width=20,
-                    height=20,
-                    fg_color="#e74c3c",
-                    hover_color="#c0392b",
+                    item_frame, text="✕", width=20, height=20, fg_color="#e74c3c", hover_color="#c0392b",
                     command=lambda p=full_path, f=filename, fol=target_folder, fr=item_frame: self.exclude_file(fol, p,
                                                                                                                 f, fr)
                 )
                 remove_btn.pack(side="right", padx=10)
 
         if self.preview_queue:
-            load_more_btn = ctk.CTkButton(
-                self.scroll_preview,
-                text=f"Показать еще ({len(self.preview_queue)} файлов осталось)...",
-                fg_color="#34495e",
-                hover_color="#2c3e50",
-                command=self.render_next_page
-            )
+            load_more_btn = ctk.CTkButton(self.scroll_preview, text=f"Показать еще...", fg_color="#34495e",
+                                          hover_color="#2c3e50", command=self.render_next_page)
             load_more_btn.is_load_more_btn = True
             load_more_btn.pack(fill="x", padx=20, pady=15)
 
@@ -148,66 +153,92 @@ class PreviewWindow(ctk.CTkToplevel):
                 del self.folder_widgets[folder]
 
     def show_image_tooltip(self, event, file_path):
-        if self.tooltip:
-            try:
-                self.tooltip.destroy()
-            except Exception:
-                pass
+        if hasattr(self, '_preview_timer') and self._preview_timer:
+            self.after_cancel(self._preview_timer)
+            self._preview_timer = None
 
         ext = os.path.splitext(file_path)[1].lower()
         if ext not in ('.jpg', '.jpeg', '.png', '.bmp', '.webp'):
             return
 
-        try:
-            raw_img = Image.open(file_path)
-            raw_img.thumbnail((200, 200), Image.Resampling.BILINEAR)
+        self._preview_timer = self.after(150, lambda: self._execute_show_preview(event, file_path))
 
-            self.tooltip_image = ctk.CTkImage(light_image=raw_img, size=raw_img.size)
+    def _execute_show_preview(self, event, file_path):
+        if self.is_windows:
+            try:
+                raw_img = Image.open(file_path)
+                raw_img.thumbnail((200, 200), Image.Resampling.BILINEAR)
+                self.tooltip_image = ctk.CTkImage(light_image=raw_img, size=raw_img.size)
 
-            self.tooltip = ctk.CTkToplevel(self)
-            self.tooltip.overrideredirect(True)
-
-            lbl = ctk.CTkLabel(self.tooltip, image=self.tooltip_image, text="")
-            lbl.pack(padx=3, pady=3)
-
-            self.move_image_tooltip(event)
-
-        except Exception as e:
-            print(f"Ошибка чтения миниатюры {file_path}: {e}")
+                self.tooltip_label.configure(image=self.tooltip_image)
+                self.move_image_tooltip(event)
+                self.tooltip.deiconify()
+                self.tooltip.attributes("-topmost", True)
+            except Exception as e:
+                print(f"Ошибка Windows превью: {e}")
+        else:
             if self.tooltip:
                 try:
                     self.tooltip.destroy()
                 except Exception:
                     pass
-                self.tooltip = None
+
+            try:
+                raw_img = Image.open(file_path)
+                raw_img.thumbnail((200, 200), Image.Resampling.BILINEAR)
+                self.tooltip_image = ctk.CTkImage(light_image=raw_img, size=raw_img.size)
+
+                self.tooltip = ctk.CTkToplevel(self)
+                self.tooltip.overrideredirect(True)
+
+                lbl = ctk.CTkLabel(self.tooltip, image=self.tooltip_image, text="")
+                lbl.pack(padx=3, pady=3)
+                self.move_image_tooltip(event)
+            except Exception as e:
+                print(f"Ошибка macOS превью: {e}")
 
     def move_image_tooltip(self, event):
-        if self.tooltip:
-            x = event.x_root + 20
-            y = event.y_root + 20
+        offset = 30 if self.is_windows else 20
+        x = event.x_root + offset
+        y = event.y_root + offset
+
+        target_tooltip = self.tooltip if (self.is_windows or self.tooltip) else None
+        if target_tooltip:
             try:
-                self.tooltip.geometry(f"+{x}+{y}")
+                target_tooltip.geometry(f"+{x}+{y}")
             except Exception:
                 pass
 
     def hide_image_tooltip(self, event):
-        if self.tooltip:
-            try:
-                self.tooltip.destroy()
-            except Exception:
-                pass
-            self.tooltip = None
-            self.tooltip_image = None
+        if hasattr(self, '_preview_timer') and self._preview_timer:
+            self.after_cancel(self._preview_timer)
+            self._preview_timer = None
+
+        if self.is_windows:
+            if self.tooltip:
+                try: self.tooltip.withdraw()
+                except Exception: pass
+            gc.collect()
+        else:
+            if self.tooltip:
+                try: self.tooltip.destroy()
+                except Exception: pass
+                self.tooltip = None
+                self.tooltip_image = None
             gc.collect()
 
     def _ensure_preview_closed(self, event) -> None:
-        if self.tooltip:
-            self.hide_image_tooltip(None)
+        if self.is_windows and self.tooltip:
+            try:
+                self.tooltip.withdraw()
+            except Exception:
+                pass
 
     def _bind_mouse_wheel(self, widget):
         widget.bind("<MouseWheel>", self._on_mouse_wheel)
         for child in widget.winfo_children():
-            child.bind("<Motion>", self._ensure_preview_closed)
+            if self.is_windows:
+                child.bind("<Motion>", self._ensure_preview_closed)
             self._bind_mouse_wheel(child)
 
     def _on_mouse_wheel(self, event) -> None:
@@ -220,7 +251,7 @@ class PreviewWindow(ctk.CTkToplevel):
                 self.scroll_preview._canvas.yview_scroll(direction, "units")
             elif hasattr(self.scroll_preview, "_parent_canvas"):
                 self.scroll_preview._parent_canvas.yview_scroll(direction, "units")
-        except Exception as e:
+        except Exception:
             pass
 
 
